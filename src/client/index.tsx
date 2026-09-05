@@ -412,7 +412,7 @@ function installStyles(): () => void {
 
 interface ClientLike {
   slots: {
-    register(opts: { name: string; registrant: string; priority?: number }, comp: (props: SeatProps) => unknown): unknown
+    register(opts: { name: string; id?: string; registrant: string; priority?: number }, comp: (props: SeatProps) => unknown): unknown
   }
   effect(fn: () => (() => void) | void, label?: string): unknown
 }
@@ -420,7 +420,7 @@ interface ClientLike {
 export function apply(ctx: ClientLike): void {
   ctx.effect(() => installStyles(), 'dsh-chat-prompt-templates: inline styles')
   ctx.slots.register(
-    { name: 'conversation.input.dock', registrant: name, priority: 10 },
+    { name: 'conversation.input.dock', id: name, registrant: name, priority: 10 },
     (props: SeatProps) => <PromptRoot {...props} />,
   )
 }
