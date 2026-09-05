@@ -210,6 +210,23 @@ function PromptRoot(props: SeatProps) {
     setNodeMode((prev) => ({ ...prev, [path]: m }))
   }, [])
 
+  /** 从“活”树按路径组合文本：嵌套子模板一律回查 tree（不受对象引用过期影响）。 */
+  const composePath = useCallback(
+    (path: string): string => {
+      const node = tree?.get(path)
+      if (!node) return ''
+      const text = node.tpl.text ?? ''
+      const resolve = (name: string): string => {
+        const val = node.values[name]
+        if (!val) return ''
+        if (val.kind === 'text') return val.text
+        return composePath(childPathOf(path, name))
+      }
+      return text.replace(/\{\{\s*([\w-]+)\s*\}\}/g, (_all, nm: string) => resolve(nm))
+    },
+    [tree],
+  )
+
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -346,7 +363,7 @@ function PromptRoot(props: SeatProps) {
     const n = tree?.get(path)
     const child = tree?.get(childKey)
     if (!n || !child) return
-    const resolved = composeNode(child)
+    const resolved = composePath(childKey)
     setTree((prev) => {
       if (!prev) return prev
       const next = pruneSubtree(prev, childKey)
@@ -413,7 +430,7 @@ function PromptRoot(props: SeatProps) {
   const hasAnyTree = useMemo(() => Object.values(nodeMode).includes('tree'), [nodeMode])
 
   const rootNode = tree ? (tree.get('root') ?? null) : null
-  const fullText = useMemo(() => (rootNode ? composeNode(rootNode) : ''), [rootNode])
+  const fullText = useMemo(() => (rootNode ? composePath('root') : ''), [rootNode, composePath])
 
   const ancestorEdges = useMemo(() => {
     const out: { parentPath: string; param: string }[] = []
@@ -565,7 +582,7 @@ function PromptRoot(props: SeatProps) {
                           <span className="lb" onClick={() => focusParam(row.path, p.name)}>{p.label || p.name}</span>
                           <span className="val">{valBadge(val)}</span>
                           <button className="pt-ic" title="预览该参数内容" onClick={() => {
-                            const text = !val ? '' : val.kind === 'text' ? val.text : composeNode({ tpl: val.tpl, values: val.values })
+                            const text = !val ? '' : val.kind === 'text' ? val.text : composePath(childPathOf(row.path, p.name))
                             setPreview({ title: `参数预览：${p.label || p.name}`, text })
                           }}>{I.eye}</button>
                           {!isTpl ? (
@@ -590,7 +607,7 @@ function PromptRoot(props: SeatProps) {
                         <button className={m === 'tree' ? 'on' : ''} title="树：展开本节点全部嵌套子树" onClick={() => setModeOf(row.path, 'tree')}>树</button>
                       </span>
                     )}
-                    <button className="pt-ic" title={isRoot ? '预览整树（将交付给 agent 的内容）' : '预览本行组合内容'} onClick={() => setPreview({ title: isRoot ? '整树组合（交付内容）' : `本行预览：${row.node.tpl.title}`, text: (isRoot ? fullText : composeNode(row.node)) || '（空）' })}>{I.eye}</button>
+                    <button className="pt-ic" title={isRoot ? '预览整树（将交付给 agent 的内容）' : '预览本行组合内容'} onClick={() => setPreview({ title: isRoot ? '整树组合（交付内容）' : `本行预览：${row.node.tpl.title}`, text: (isRoot ? fullText : composePath(row.path)) || '（空）' })}>{I.eye}</button>
                     <button className="pt-ic" title="修改模板" onClick={() => setPicker({ kind: 'replace', path: row.path })}>{I.tpl}</button>
                     {isRoot && (
                       <button className="pt-ic" title="重置为默认标准模板 {{prompt}}" onClick={resetDefault}>{I.reset}</button>
