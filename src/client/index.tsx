@@ -177,34 +177,34 @@ function PromptRoot(props: SeatProps) {
   const dockMax = () => Math.max(DOCK_H_MIN, Math.round((window.innerHeight || 720) * 0.72))
   const clampDock = (h: number) => Math.min(dockMax(), Math.max(DOCK_H_MIN, h))
   const dragY = useRef<{ y: number; h: number } | null>(null)
-  const dockDrag = (set: (h: number) => void) => ({
-    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.currentTarget.setPointerCapture(e.pointerId)
-      const base = (document.querySelector('.pt-dock') as HTMLElement | null)?.offsetHeight ?? dockH ?? 300
-      const h = clampDock(base)
-      dragY.current = { y: e.clientY, h }
-      set(h)
-    },
-    onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onVHandleDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const base = (document.querySelector('.pt-dock') as HTMLElement | null)?.offsetHeight ?? dockH ?? 300
+    const h = clampDock(base)
+    dragY.current = { y: e.clientY, h }
+    setDockH(h)
+    const move = (ev: PointerEvent) => {
       if (!dragY.current) return
-      const h = clampDock(dragY.current.h + (e.clientY - dragY.current.y))
-      dragY.current.h = h
-      set(h)
-    },
-    onPointerUp: () => {
-      const h = dragY.current?.h
+      const nh = clampDock(dragY.current.h + (ev.clientY - dragY.current.y))
+      dragY.current.h = nh
+      setDockH(nh)
+    }
+    const up = () => {
+      const last = dragY.current?.h
       dragY.current = null
-      if (h !== undefined) {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      if (last !== undefined) {
         try {
-          localStorage.setItem(DOCK_H_KEY, String(Math.round(h)))
+          localStorage.setItem(DOCK_H_KEY, String(Math.round(last)))
         } catch { /* ignore */ }
       }
-    },
-    onPointerCancel: () => {
-      dragY.current = null
-    },
-  })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
 
   const modeOf = useCallback((path: string): NodeMode => nodeMode[path] ?? 'stack', [nodeMode])
   const setModeOf = useCallback((path: string, m: NodeMode) => {
@@ -543,7 +543,6 @@ function PromptRoot(props: SeatProps) {
     </div>
   )
 
-  const vh = dockDrag(setDockH)
   return (
     <div className={`pt-dock${dockH ? ' fixed' : ''}`} style={dockH ? { height: dockH } : undefined}>
       <div className="pt-body">
@@ -608,7 +607,7 @@ function PromptRoot(props: SeatProps) {
         )}
         {note && <div className="pt-soft" style={{ padding: '1px 8px', fontSize: 11, color: '#8b949e' }}>{note}</div>}
       </div>
-      <div className="pt-vhandle" title="拖动调整面板高度（松手记忆）" {...vh} />
+      <div className="pt-vhandle" title="拖动调整面板高度（松手记忆）" onPointerDown={onVHandleDown} />
       {picker?.kind === 'param' && pickList(`选择子模板填充参数「${picker.param}」`, (t) => setParamTpl(picker.at, picker.param, t))}
       {picker?.kind === 'replace' && pickList('修改模板', (t) => replaceNodeTpl(picker.path, t))}
       {preview !== null && (
