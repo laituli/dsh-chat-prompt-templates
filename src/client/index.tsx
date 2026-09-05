@@ -100,9 +100,10 @@ const CSS = `
 .pt-modal .foot { padding:8px 14px; border-top:1px solid #21262d; display:flex; gap:8px; justify-content:flex-end; }
 `
 
-/** 会话输入区槽位的 owner 共享 + 会话标准套件（结构最小化，不做跨包值导入）。 */
+/** 会话输入区槽位的 owner 共享 + 会话标准套件（结构最小化，不做跨包值导入）。
+ * 输入区 owner 提供 `input`/`session` 快照（渲染器持续重渲染，随草稿更新）。 */
 interface SeatProps {
-  useInput?: (() => { draft?: string } | null | undefined) | undefined
+  input?: { draft?: string } | undefined
   inputActions?: { setDraft(text: string): void; submit?(): void }
 }
 
@@ -127,7 +128,8 @@ function PromptRoot(props: SeatProps) {
   const [note, setNote] = useState('')
   const lastSync = useRef('')
   const actions = props.inputActions
-  const useSnapshot = props.useInput ?? (() => null)
+  // 输入区 owner 快照里的草稿（随输入实时更新、由渲染器重渲染推送，无需订阅）。
+  const snapshotDraft = props.input?.draft
 
   // 拉取外部预设（默认 launcher#help 的 /api/prompt-presets；不可达忽略）。
   useEffect(() => {
@@ -289,8 +291,7 @@ function PromptRoot(props: SeatProps) {
     [nodeAt, actions],
   )
 
-  // 聊天框即参数编辑器：把输入的变化实时写回被聚焦的参数。
-  const snapshotDraft = useSnapshot()?.draft
+  // 聊天框即参数编辑器：把输入的变化实时写回被聚焦的参数（快照随渲染推送）。
   useEffect(() => {
     if (!editing) return
     if (typeof snapshotDraft !== 'string') return
