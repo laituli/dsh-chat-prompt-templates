@@ -104,6 +104,10 @@ function composeNode(node: { tpl: PromptTemplate; values: Record<string, ParamVa
 
 const CSS = `
 .pt-wrap { display:flex; flex-direction:column; gap:3px; padding:3px 8px 6px; }
+.pt-scroll { max-height: 264px; overflow-y:auto; overscroll-behavior:contain; }
+.pt-mode { display:inline-flex; gap:2px; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
+.pt-mode button { border:0; background:transparent; color:#8b949e; padding:0 8px; font-size:11px; cursor:pointer; line-height:18px; }
+.pt-mode button.on { color:#e6edf3; background:#1f6feb33; }
 .pt-tools { display:flex; align-items:center; gap:8px; font-size:11.5px; color:#8b949e; flex-wrap:wrap; }
 .pt-chip { border:1px solid rgba(127,127,127,.35); background:#21262d; color:#c9d1d9; border-radius:12px; padding:1px 9px; font-size:11.5px; cursor:pointer; }
 .pt-chip:hover { background:#2a303a; }
@@ -145,6 +149,7 @@ function PromptRoot(props: SeatProps) {
   const [library, setLibrary] = useState<PromptTemplate[]>(BUILTIN)
   const [tree, setTree] = useState<Tree | null>(null)
   const [activePath, setActivePath] = useState('root')
+  const [mode, setMode] = useState<'stack' | 'tree'>('stack')
   const [editing, setEditing] = useState<{ path: string; param: string } | null>(null)
   const [picker, setPicker] = useState<{ kind: 'root' } | { kind: 'param'; at: string; param: string } | { kind: 'replace'; path: string } | null>(null)
   const [preview, setPreview] = useState<{ title: string; text: string } | null>(null)
@@ -306,22 +311,41 @@ function PromptRoot(props: SeatProps) {
     setNote('已重置为默认标准模板 {{prompt}}')
   }, [])
 
-  // 行集合（先序，含嵌套子模板行）。
-  const rows = useMemo<Row[]>(() => {
-    if (!tree) return []
-    const out: Row[] = []
-    const walk = (path: string, depth: number) => {
-      const n = tree.get(path)
-      if (!n) return
-      out.push({ path, depth, node: n })
-      for (const p of n.tpl.params ?? []) {
-        const v = n.values[p.name]
-        if (v && v.kind === 'tpl') walk(childPathOf(path, p.name), depth + 1)
-      }
+  // 从根到某节点的路径节点列表。
+  const pathNodes = useCallback((target: string): string[] => {
+    const out: string[] = []
+    if (!tree) return out
+    let cur = 'root'
+    while (tree.has(cur)) {
+      out.push(cur)
+      if (cur === target) break
+      const rest = target.slice(cur.length + 1)
+      const idx = rest.indexOf(':')
+      const stepParam = idx < 0 ? rest : rest.slice(0, idx)
+      cur = childPathOf(cur, stepParam)
     }
-    walk('root', 0)
     return out
   }, [tree])
+
+  // 行集合：默认「栈」模式只显示 聚焦节点→根 的路径行（显示容量有限）；
+  // 「树」模式显示完整树（外层滚动条）。行 = 实例化模板节点。
+  const rows = useMemo<Row[]>(() => {
+    if (!tree) return []
+    const walk = (path: string, depth: number): Row[] => {
+      const n = tree.get(path)
+      if (!n) return []
+      const out: Row[] = [{ path, depth, node: n }]
+      for (const p of n.tpl.params ?? []) {
+        const v = n.values[p.name]
+        if (v && v.kind === 'tpl') out.push(...walk(childPathOf(path, p.name), depth + 1))
+      }
+      return out
+    }
+    if (mode === 'stack') {
+      return pathNodes(activePath).map((p, i) => ({ path: p, depth: i, node: tree.get(p)! }))
+    }
+    return walk('root', 0)
+  }, [tree, mode, activePath, pathNodes])
 
   const rootNode = tree ? (tree.get('root') ?? null) : null
   const fullText = useMemo(() => (rootNode ? composeNode(rootNode) : ''), [rootNode])
@@ -465,12 +489,16 @@ function PromptRoot(props: SeatProps) {
               : '点击参数用聊天框编辑；提交时交付整树组合（先「预览」核对）'}
         </span>
         <span style={{ flex: 1 }} />
+        <span className="pt-mode" title="显示模式：栈（聚焦节点→根，默认）/ 树（完整树，可滚动）">
+          <button className={mode === 'stack' ? 'on' : ''} title="栈模式（默认）：只显示 聚焦节点→根 的路径" onClick={() => setMode('stack')}>栈</button>
+          <button className={mode === 'tree' ? 'on' : ''} title="树模式：完整模板树（滚动查看）" onClick={() => setMode('tree')}>树</button>
+        </span>
         <button className="pt-ic" title="预览整树：将交付给 agent 的内容" onClick={() => setPreview({ title: '整树组合（交付内容）', text: fullText || '（空）' })}>{I.eye}</button>
         <button className="pt-ic" title="重置为默认标准模板 {{prompt}}" onClick={resetDefault}>{I.reset}</button>
         {note && <span className="pt-soft">{note}</span>}
       </div>
       {rootNode && (
-        <div className="pt-wrap">
+        <div className={`pt-wrap${mode === 'tree' ? ' pt-scroll' : ''}`}>
           {rows.map((row) => {
             const isActive = row.path === activePath
             const paramRefs = paramsOf(row.node)
