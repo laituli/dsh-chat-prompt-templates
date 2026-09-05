@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-prompt-templates",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Open-source dsh web client plugin: prompt template picker for the chat input. Pick a template (incl. presets fetched from e.g. http://127.0.0.1:3079/api/prompt-presets), fill/nest parameters (tree, with a visible template stack above the chat box), preview the full prompt in a modal, then apply — replacing the next draft via the conversation input actions.",
   "license": "MIT",
   "type": "module",
