@@ -481,13 +481,13 @@ function PromptRoot(props: SeatProps) {
   return (
     <>
       <div className="pt-tools">
-        <span className="pt-edit-hint">
-          {editing
-            ? `聊天框正在编辑参数「${editing.param}」`
-            : activePath !== 'root'
+        {!editing && (
+          <span className="pt-edit-hint">
+            {activePath !== 'root'
               ? '已聚焦子模板行：点击该行参数开始用聊天框编辑'
-              : '点击参数用聊天框编辑；提交时交付整树组合（先「预览」核对）'}
-        </span>
+              : '点击参数用聊天框编辑；提交时交付整树组合（可「预览」核对）'}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <span className="pt-mode" title="显示模式：栈（聚焦节点→根，默认）/ 树（完整树，可滚动）">
           <button className={mode === 'stack' ? 'on' : ''} title="栈模式（默认）：只显示 聚焦节点→根 的路径" onClick={() => setMode('stack')}>栈</button>
