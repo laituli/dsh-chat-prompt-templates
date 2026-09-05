@@ -17,6 +17,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 export const name = 'dsh-chat-prompt-templates'
 
+/** client 侧注入：slots（槽位服务，client runtime 提供）。 */
+export const inject = ['slots']
+
 /** 注册进本插件的模板（内部或外部预设）。 */
 interface PromptParam { name: string; label: string; example?: string }
 interface PromptTemplate {
