@@ -13,6 +13,7 @@
  * - 聊天框=参数编辑输入面；提交（发送/回车）交付整树根组合文本（根 👁 预览核对）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 
 export const name = 'dsh-chat-prompt-templates'
 
@@ -80,6 +81,10 @@ const I = {
   reset: '⟲',
 } as const
 
+/** 面板高度记忆键（整体高度可拖动拉伸）。 */
+const DOCK_H_KEY = 'dsh-chat-prompt-templates:dockH'
+const DOCK_H_MIN = 90
+
 function defaultValues(tpl: PromptTemplate): Record<string, ParamValue> {
   const values: Record<string, ParamValue> = {}
   for (const p of tpl.params ?? []) values[p.name] = { kind: 'text', text: '' }
@@ -115,6 +120,11 @@ const CSS = `
 .pt-param .lb:hover { text-decoration:underline; }
 .pt-param .val { color:#8b949e; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pt-rowctl { flex:0 0 auto; display:inline-flex; align-items:center; gap:5px; }
+.pt-dock { display:flex; flex-direction:column; min-width:0; }
+.pt-dock .pt-body { overflow-y:auto; min-height:0; scrollbar-width:thin; }
+.pt-dock.fixed .pt-body { flex:1 1 auto; }
+.pt-vhandle { flex:0 0 auto; height:8px; cursor:ns-resize; touch-action:none; background-image:radial-gradient(circle, #3b4454 1.1px, transparent 1.2px); background-size:9px 9px; background-position:center; background-repeat:no-repeat; }
+.pt-vhandle:hover { background-color:rgba(31,111,235,.16); }
 .pt-ic { border:0; background:transparent; color:#8b949e; padding:0 2px; font-size:11px; cursor:pointer; line-height:1; }
 .pt-ic:hover { color:#e6edf3; }
 .pt-mode { display:inline-flex; gap:1px; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
@@ -154,6 +164,47 @@ function PromptRoot(props: SeatProps) {
   const snapshotDraft = props.input?.draft
   const origSubmitRef = useRef<(() => void) | null>(null)
   const wrappedRef = useRef(false)
+
+  // 面板整体高度（可拖动拉伸；localStorage 记忆）。
+  const [dockH, setDockH] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(DOCK_H_KEY))
+      return Number.isFinite(v) && v >= DOCK_H_MIN ? Math.round(v) : null
+    } catch {
+      return null
+    }
+  })
+  const dockMax = () => Math.max(DOCK_H_MIN, Math.round((window.innerHeight || 720) * 0.72))
+  const clampDock = (h: number) => Math.min(dockMax(), Math.max(DOCK_H_MIN, h))
+  const dragY = useRef<{ y: number; h: number } | null>(null)
+  const dockDrag = (set: (h: number) => void) => ({
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      const base = (document.querySelector('.pt-dock') as HTMLElement | null)?.offsetHeight ?? dockH ?? 300
+      const h = clampDock(base)
+      dragY.current = { y: e.clientY, h }
+      set(h)
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!dragY.current) return
+      const h = clampDock(dragY.current.h + (e.clientY - dragY.current.y))
+      dragY.current.h = h
+      set(h)
+    },
+    onPointerUp: () => {
+      const h = dragY.current?.h
+      dragY.current = null
+      if (h !== undefined) {
+        try {
+          localStorage.setItem(DOCK_H_KEY, String(Math.round(h)))
+        } catch { /* ignore */ }
+      }
+    },
+    onPointerCancel: () => {
+      dragY.current = null
+    },
+  })
 
   const modeOf = useCallback((path: string): NodeMode => nodeMode[path] ?? 'stack', [nodeMode])
   const setModeOf = useCallback((path: string, m: NodeMode) => {
@@ -492,70 +543,74 @@ function PromptRoot(props: SeatProps) {
     </div>
   )
 
+  const vh = dockDrag(setDockH)
   return (
-    <>
-      {rootNode && (
-        <div className={`pt-wrap${hasAnyTree ? ' pt-scroll' : ''}`}>
-          {rows.map((row) => {
-            const isRoot = row.path === 'root'
-            const isActive = row.path === activePath
-            const m = modeOf(row.path)
-            const kids = nestedChildren(row.path)
-            const parentOfParam = (p: string) => ancestorEdges.find((a) => a.parentPath === row.path && a.param === p)
-            return (
-              <div key={row.path} className={`pt-elem${isActive ? ' active' : ''}`} style={{ marginLeft: row.depth * 18 }}>
-                <span className="et" title="点击聚焦本行" onClick={() => { setActivePath(row.path); setEditing(null) }}>{row.node.tpl.title}</span>
-                <span className="mid">
-                  {paramsOf(row.node).map((p) => {
-                    const val = row.node.values[p.name]
-                    const isTpl = !!val && val.kind === 'tpl'
-                    const isFocus = editing?.path === row.path && editing?.param === p.name
-                    const isAnc = !!parentOfParam(p.name)
-                    const cls = ['pt-param', isFocus ? 'focus' : '', isAnc ? 'anc' : ''].filter(Boolean).join(' ')
-                    return (
-                      <span key={p.name} className={cls} title={isTpl ? `${p.label}：子模板` : `${p.label}：点击=用聊天框编辑`}>
-                        <span className="lb" onClick={() => focusParam(row.path, p.name)}>{p.label || p.name}</span>
-                        <span className="val">{valBadge(val)}</span>
-                        <button className="pt-ic" title="预览该参数内容" onClick={() => {
-                          const text = !val ? '' : val.kind === 'text' ? val.text : composeNode({ tpl: val.tpl, values: val.values })
-                          setPreview({ title: `参数预览：${p.label || p.name}`, text })
-                        }}>{I.eye}</button>
-                        {!isTpl ? (
-                          <button className="pt-ic" title="修改模板：用另一模板填充该参数" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
-                        ) : (
-                          <>
-                            <button className="pt-ic" title="修改模板：更换该参数的子模板" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
-                            <button className="pt-ic" title="解套：把子模板组合结果填入该参数并改回文本" onClick={() => unnestParam(row.path, p.name)}>{I.unnest}</button>
-                          </>
-                        )}
-                        {!isTpl && val && val.kind === 'text' && val.text !== '' && (
-                          <button className="pt-ic" title="清空该参数" onClick={() => clearParam(row.path, p.name)}>{I.clear}</button>
-                        )}
+    <div className={`pt-dock${dockH ? ' fixed' : ''}`} style={dockH ? { height: dockH } : undefined}>
+      <div className="pt-body">
+        {rootNode && (
+          <div className={`pt-wrap${hasAnyTree || dockH ? ' pt-scroll' : ''}`}>
+            {rows.map((row) => {
+              const isRoot = row.path === 'root'
+              const isActive = row.path === activePath
+              const m = modeOf(row.path)
+              const kids = nestedChildren(row.path)
+              const parentOfParam = (p: string) => ancestorEdges.find((a) => a.parentPath === row.path && a.param === p)
+              return (
+                <div key={row.path} className={`pt-elem${isActive ? ' active' : ''}`} style={{ marginLeft: row.depth * 18 }}>
+                  <span className="et" title="点击聚焦本行" onClick={() => { setActivePath(row.path); setEditing(null) }}>{row.node.tpl.title}</span>
+                  <span className="mid">
+                    {paramsOf(row.node).map((p) => {
+                      const val = row.node.values[p.name]
+                      const isTpl = !!val && val.kind === 'tpl'
+                      const isFocus = editing?.path === row.path && editing?.param === p.name
+                      const isAnc = !!parentOfParam(p.name)
+                      const cls = ['pt-param', isFocus ? 'focus' : '', isAnc ? 'anc' : ''].filter(Boolean).join(' ')
+                      return (
+                        <span key={p.name} className={cls} title={isTpl ? `${p.label}：子模板` : `${p.label}：点击=用聊天框编辑`}>
+                          <span className="lb" onClick={() => focusParam(row.path, p.name)}>{p.label || p.name}</span>
+                          <span className="val">{valBadge(val)}</span>
+                          <button className="pt-ic" title="预览该参数内容" onClick={() => {
+                            const text = !val ? '' : val.kind === 'text' ? val.text : composeNode({ tpl: val.tpl, values: val.values })
+                            setPreview({ title: `参数预览：${p.label || p.name}`, text })
+                          }}>{I.eye}</button>
+                          {!isTpl ? (
+                            <button className="pt-ic" title="修改模板：用另一模板填充该参数" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
+                          ) : (
+                            <>
+                              <button className="pt-ic" title="修改模板：更换该参数的子模板" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
+                              <button className="pt-ic" title="解套：把子模板组合结果填入该参数并改回文本" onClick={() => unnestParam(row.path, p.name)}>{I.unnest}</button>
+                            </>
+                          )}
+                          {!isTpl && val && val.kind === 'text' && val.text !== '' && (
+                            <button className="pt-ic" title="清空该参数" onClick={() => clearParam(row.path, p.name)}>{I.clear}</button>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </span>
+                  <span className="pt-rowctl">
+                    {kids.length > 0 && (
+                      <span className="pt-mode" title="该节点的显示模式：栈=聚焦路径；树=整棵子树">
+                        <button className={m === 'stack' ? 'on' : ''} title="栈：只显示 聚焦节点→根 的路径" onClick={() => setModeOf(row.path, 'stack')}>栈</button>
+                        <button className={m === 'tree' ? 'on' : ''} title="树：展开本节点全部嵌套子树" onClick={() => setModeOf(row.path, 'tree')}>树</button>
                       </span>
-                    )
-                  })}
-                </span>
-                <span className="pt-rowctl">
-                  {kids.length > 0 && (
-                    <span className="pt-mode" title="该节点的显示模式：栈=聚焦路径；树=整棵子树">
-                      <button className={m === 'stack' ? 'on' : ''} title="栈：只显示 聚焦节点→根 的路径" onClick={() => setModeOf(row.path, 'stack')}>栈</button>
-                      <button className={m === 'tree' ? 'on' : ''} title="树：展开本节点全部嵌套子树" onClick={() => setModeOf(row.path, 'tree')}>树</button>
-                    </span>
-                  )}
-                  <button className="pt-ic" title={isRoot ? '预览整树（将交付给 agent 的内容）' : '预览本行组合内容'} onClick={() => setPreview({ title: isRoot ? '整树组合（交付内容）' : `本行预览：${row.node.tpl.title}`, text: (isRoot ? fullText : composeNode(row.node)) || '（空）' })}>{I.eye}</button>
-                  <button className="pt-ic" title="修改模板" onClick={() => setPicker({ kind: 'replace', path: row.path })}>{I.tpl}</button>
-                  {isRoot && (
-                    <button className="pt-ic" title="重置为默认标准模板 {{prompt}}" onClick={resetDefault}>{I.reset}</button>
-                  )}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      )}
+                    )}
+                    <button className="pt-ic" title={isRoot ? '预览整树（将交付给 agent 的内容）' : '预览本行组合内容'} onClick={() => setPreview({ title: isRoot ? '整树组合（交付内容）' : `本行预览：${row.node.tpl.title}`, text: (isRoot ? fullText : composeNode(row.node)) || '（空）' })}>{I.eye}</button>
+                    <button className="pt-ic" title="修改模板" onClick={() => setPicker({ kind: 'replace', path: row.path })}>{I.tpl}</button>
+                    {isRoot && (
+                      <button className="pt-ic" title="重置为默认标准模板 {{prompt}}" onClick={resetDefault}>{I.reset}</button>
+                    )}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {note && <div className="pt-soft" style={{ padding: '1px 8px', fontSize: 11, color: '#8b949e' }}>{note}</div>}
+      </div>
+      <div className="pt-vhandle" title="拖动调整面板高度（松手记忆）" {...vh} />
       {picker?.kind === 'param' && pickList(`选择子模板填充参数「${picker.param}」`, (t) => setParamTpl(picker.at, picker.param, t))}
       {picker?.kind === 'replace' && pickList('修改模板', (t) => replaceNodeTpl(picker.path, t))}
-      {note && <div className="pt-soft" style={{ padding: '1px 8px', fontSize: 11, color: '#8b949e' }}>{note}</div>}
       {preview !== null && (
         <div className="pt-modal-back" onClick={() => setPreview(null)}>
           <div className="pt-modal" onClick={(e) => e.stopPropagation()}>
@@ -567,7 +622,7 @@ function PromptRoot(props: SeatProps) {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
 
