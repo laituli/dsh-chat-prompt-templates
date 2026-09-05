@@ -46,6 +46,16 @@ const DEFAULT_ROOT: PromptTemplate = {
 const BUILTIN: PromptTemplate[] = [
   DEFAULT_ROOT,
   {
+    id: 'concat-two',
+    title: '拼接两段',
+    description: '把两段内容按序拼接（段落间留空行）；每段都可再嵌套模板。',
+    text: '{{a}}\n\n{{b}}',
+    params: [
+      { name: 'a', label: '片段 A' },
+      { name: 'b', label: '片段 B' },
+    ],
+  },
+  {
     id: 'launcher-dev-profile',
     title: '开发/维护个人级 profile 或插件',
     description: '描述需求 → agent 读 dsh-launcher-skill/API 后按“加 reg profile”模式执行。',
@@ -62,14 +72,13 @@ const DEFAULT_PRESET_URLS = ['http://127.0.0.1:3079/api/prompt-presets']
 const STORAGE_PRESET_URLS = 'dsh-chat-prompt-templates:presetUrls'
 const childPathOf = (at: string, param: string): string => `${at}:${param}`
 
-/** Icon-only 按钮（title 说明）；不用文字。 */
+/** Icon-only 按钮（title 说明）；预览统一用小眼睛，模板改动（行/参数）统一模板图标，
+ *  解套 ↩、清空 ✕、重置 ⟲。图标不做差异化配色。 */
 const I = {
-  preview: '◉',
-  change: '⇄',
-  nest: '⊞',
+  eye: '👁',
+  tpl: '▦',
   unnest: '↩',
   clear: '✕',
-  previewTree: '◉',
   reset: '⟲',
 } as const
 
@@ -110,7 +119,6 @@ const CSS = `
 .pt-param .val { color:#8b949e; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pt-ic { border:0; background:transparent; color:#8b949e; padding:0 2px; font-size:11px; cursor:pointer; line-height:1; }
 .pt-ic:hover { color:#e6edf3; }
-.pt-ic.on { color:#e3b341; }
 .pt-edit-hint { color:#7ee787; font-size:11px; }
 .pt-soft { color:#8b949e; font-size:11px; }
 .pt-pick { position:fixed; z-index:60; max-height:55vh; overflow:auto; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:6px; box-shadow:0 8px 28px rgba(0,0,0,.5); min-width:360px; }
@@ -245,18 +253,49 @@ function PromptRoot(props: SeatProps) {
     [setRootTpl, setParamTpl],
   )
 
+  /** 从树上移除一个节点及其全部后代（子树）。 */
+  const pruneSubtree = useCallback((prev: Tree, path: string): Tree => {
+    const next = new Map(prev)
+    const prefix = `${path}:`
+    for (const key of next.keys()) {
+      if (key === path || key.startsWith(prefix)) next.delete(key)
+    }
+    return next
+  }, [])
+
   const clearParam = useCallback((path: string, param: string) => {
     setTree((prev) => {
       if (!prev) return prev
-      const next = new Map(prev)
-      const n = next.get(path)
+      const n = prev.get(path)
       if (!n) return prev
-      next.delete(childPathOf(path, param))
+      const next = pruneSubtree(prev, childPathOf(path, param))
       next.set(path, { tpl: n.tpl, values: { ...n.values, [param]: { kind: 'text', text: '' } } })
       return next
     })
     if (editing?.path === path && editing?.param === param) setEditing(null)
-  }, [editing])
+    else if (editing && (editing.path === childPathOf(path, param) || editing.path.startsWith(`${childPathOf(path, param)}:`))) setEditing(null)
+    setActivePath(path)
+  }, [editing, pruneSubtree])
+
+  /** 解套：把子模板当前的组合结果（= 解套前的预览内容）赋值给该参数，并删除子树。 */
+  const unnestParam = useCallback((path: string, param: string) => {
+    const childKey = childPathOf(path, param)
+    const n = tree?.get(path)
+    const child = tree?.get(childKey)
+    if (!n || !child) return
+    const resolved = composeNode(child)
+    setTree((prev) => {
+      if (!prev) return prev
+      const next = pruneSubtree(prev, childKey)
+      next.set(path, { tpl: n.tpl, values: { ...n.values, [param]: { kind: 'text', text: resolved } } })
+      return next
+    })
+    setEditing({ path, param })
+    setActivePath(path)
+    lastSync.current = resolved
+    actions?.setDraft(resolved)
+    setNote(`已解套：参数「${param}」= 子模板组合结果（${resolved.length} 字符），可在聊天框继续改`)
+  }, [tree, pruneSubtree, actions])
 
   const resetDefault = useCallback(() => {
     const t = new Map<string, { tpl: PromptTemplate; values: Record<string, ParamValue> }>()
@@ -426,7 +465,7 @@ function PromptRoot(props: SeatProps) {
               : '点击参数用聊天框编辑；提交时交付整树组合（先「预览」核对）'}
         </span>
         <span style={{ flex: 1 }} />
-        <button className="pt-ic" title="预览：整树（将交付给 agent 的内容）" onClick={() => setPreview({ title: '整树组合（交付内容）', text: fullText || '（空）' })}>{I.previewTree}</button>
+        <button className="pt-ic" title="预览整树：将交付给 agent 的内容" onClick={() => setPreview({ title: '整树组合（交付内容）', text: fullText || '（空）' })}>{I.eye}</button>
         <button className="pt-ic" title="重置为默认标准模板 {{prompt}}" onClick={resetDefault}>{I.reset}</button>
         {note && <span className="pt-soft">{note}</span>}
       </div>
@@ -439,8 +478,8 @@ function PromptRoot(props: SeatProps) {
             return (
               <div key={row.path} className={`pt-elem${isActive ? ' active' : ''}`} style={{ marginLeft: row.depth * 22 }}>
                 <span className="et" title="点击聚焦本行" onClick={() => { setActivePath(row.path); setEditing(null) }}>{row.node.tpl.title}</span>
-                <button className="pt-ic" title="预览本行组合内容" onClick={() => setPreview({ title: `本行预览：${row.node.tpl.title}`, text: rowNodeCompose(row.node) || '（空）' })}>{I.preview}</button>
-                <button className="pt-ic" title="修改模板（更换本模板）" onClick={() => setPicker({ kind: 'replace', path: row.path })}>{I.change}</button>
+                <button className="pt-ic" title="预览本行组合内容" onClick={() => setPreview({ title: `本行预览：${row.node.tpl.title}`, text: rowNodeCompose(row.node) || '（空）' })}>{I.eye}</button>
+                <button className="pt-ic" title="修改模板（更换本模板）" onClick={() => setPicker({ kind: 'replace', path: row.path })}>{I.tpl}</button>
                 {paramRefs.map((p) => {
                   const val = row.node.values[p.name]
                   const isTpl = !!val && val.kind === 'tpl'
@@ -454,13 +493,16 @@ function PromptRoot(props: SeatProps) {
                       <button className="pt-ic" title="预览该参数内容" onClick={() => {
                         const text = !val ? '' : val.kind === 'text' ? val.text : composeNode({ tpl: val.tpl, values: val.values })
                         setPreview({ title: `参数预览：${p.label || p.name}`, text })
-                      }}>{I.preview}</button>
+                      }}>{I.eye}</button>
                       {!isTpl ? (
-                        <button className="pt-ic on" title="嵌套：用另一模板填充该参数（新行）" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.nest}</button>
+                        <button className="pt-ic" title="修改模板：用另一模板填充该参数（新行）" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
                       ) : (
-                        <button className="pt-ic" title="解套：该参数改为直接文本" onClick={() => clearParam(row.path, p.name)}>{I.unnest}</button>
+                        <>
+                          <button className="pt-ic" title="修改模板：更换该参数的子模板" onClick={() => setPicker({ kind: 'param', at: row.path, param: p.name })}>{I.tpl}</button>
+                          <button className="pt-ic" title="解套：把子模板的组合结果填入该参数并改回文本" onClick={() => unnestParam(row.path, p.name)}>{I.unnest}</button>
+                        </>
                       )}
-                      {val && (val.kind === 'text' ? val.text !== '' : true) && (
+                      {!isTpl && val && val.kind === 'text' && val.text !== '' && (
                         <button className="pt-ic" title="清空该参数" onClick={() => clearParam(row.path, p.name)}>{I.clear}</button>
                       )}
                     </span>
