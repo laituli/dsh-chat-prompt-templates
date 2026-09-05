@@ -158,7 +158,6 @@ function PromptRoot(props: SeatProps) {
   const [editing, setEditing] = useState<{ path: string; param: string } | null>(null)
   const [picker, setPicker] = useState<{ kind: 'param'; at: string; param: string } | { kind: 'replace'; path: string } | null>(null)
   const [preview, setPreview] = useState<{ title: string; text: string } | null>(null)
-  const [note, setNote] = useState('')
   const lastSync = useRef('')
   const actions = props.inputActions
   const snapshotDraft = props.input?.draft
@@ -292,7 +291,6 @@ function PromptRoot(props: SeatProps) {
       setEditing(first ? { path: 'root', param: first } : null)
       setNodeMode({})
       setPicker(null)
-      setNote(`根模板改为「${tpl.title}」`)
     },
     [instantiate],
   )
@@ -367,7 +365,6 @@ function PromptRoot(props: SeatProps) {
     setActivePath(path)
     lastSync.current = resolved
     actions?.setDraft(resolved)
-    setNote(`已解套：参数「${param}」= 子模板组合结果`)
   }, [tree, pruneSubtree, actions])
 
   const resetDefault = useCallback(() => {
@@ -377,7 +374,6 @@ function PromptRoot(props: SeatProps) {
     setActivePath('root')
     setEditing({ path: 'root', param: 'prompt' })
     setNodeMode({})
-    setNote('已重置为默认标准模板 {{prompt}}')
   }, [])
 
   const nestedChildren = useCallback(
@@ -603,9 +599,8 @@ function PromptRoot(props: SeatProps) {
                 </div>
               )
             })}
-          </div>
+            </div>
         )}
-        {note && <div className="pt-soft" style={{ padding: '1px 8px', fontSize: 11, color: '#8b949e' }}>{note}</div>}
       </div>
       <div className="pt-vhandle" title="拖动调整面板高度（松手记忆）" onPointerDown={onVHandleDown} />
       {picker?.kind === 'param' && pickList(`选择子模板填充参数「${picker.param}」`, (t) => setParamTpl(picker.at, picker.param, t))}
