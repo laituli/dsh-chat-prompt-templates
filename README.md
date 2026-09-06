@@ -31,7 +31,7 @@ Open-source dsh **web 客户端插件**：聊天下一条消息的「提示词�
 
 依赖：
 ```json
-{ "dependencies": { "dsh-chat-prompt-templates": "github:laituli/dsh-chat-prompt-templates#last_release" } }
+{ "dependencies": { "dsh-chat-prompt-templates": "github:laituli/dsh-chat-prompt-templates#v0.8.3" } }
 ```
 行（profile 的 `cordis.patch.yml` insert；**不要**加进 `dsh.profile.bundles`——
 bundles 要求包声明 `dsh.bundle`）：
